@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const db = require("../config/db"); // MySQL connection
+const db = require("../config/db"); 
 require("dotenv").config();
 
 router.get("/users", (req, res) => {
@@ -24,7 +24,7 @@ router.post("/signup", async (req, res) => {
   }
 
   try {
-    // Check if user already exists
+    
     db.query("SELECT * FROM users WHERE email = ?", [email], async (err, results) => {
       if (err) {
         console.error("Error checking existing user:", err);
@@ -35,17 +35,17 @@ router.post("/signup", async (req, res) => {
         return res.status(400).json({ message: "User already exists" });
       }
 
-      // Hash password
+      
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Save user with 'pending' status
+   
       const newUser = {
         name,
         email,
         password: hashedPassword,
         gender,
         city,
-        status: "pending", // waiting for admin approval
+        status: "pending", 
       };
 
       db.query("INSERT INTO users SET ?", newUser, (err) => {
@@ -85,18 +85,18 @@ router.post("/login", (req, res) => {
 
     const user = results[0];
 
-    // Check if user is approved
+    
     if (user.status !== "approved") {
       return res.status(403).json({ message: "Your account is not approved yet by admin." });
     }
 
-    // Compare passwords
+   
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // Generate JWT token
+    
     const token = jwt.sign(
       { id: user.id, email: user.email, role: "user" },
       process.env.JWT_SECRET,
