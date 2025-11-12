@@ -64,16 +64,21 @@ const UserService = {
     return {message:"connection request sent"};
   },*/
   },
- async getNotifications(userId) {
+  async addNotification(userId, message) {
+    const query = "INSERT INTO notifications (user_id, message, is_read) VALUES (?, ?, ?)";
+    const [result] = await pool.execute(query, [userId, message, false]);
+    return result;
+  },
+  async getNotifications(userId) {
     const [rows] = await pool.query(
-      "SELECT id, message, `read`, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC",
+      "SELECT id, message, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC",
       [userId]
     );
     return rows;
   },
   async markReadNotifications(userId) {
     await pool.query(
-      "UPDATE notifications SET `read` = TRUE WHERE user_id = ?",
+      "UPDATE notifications SET is_read = TRUE WHERE user_id = ?",
       [userId]
     );
     return { message: "All notifications marked as read." };
