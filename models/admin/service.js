@@ -1,29 +1,52 @@
 const pool = require("../../config/db");
-const { getUserById } = require("./controller");
+const sendEmail = require("../../utils/email"); // optional, for email notifications
 
 const AdminService = {
+  // ==============================
+  // Get all pending forms
+  // ==============================
   async getPendingForms() {
-    const [rows] = await pool.query("SELECT * FROM forms WHERE status = 'Pending'");
-    return rows;
-  },
-
-  async updateFormStatus(id, status) {
-    const[result]=await pool.execute("UPDATE forms SET status = ? WHERE id = ?", [status, id]);
-    return result;
-  },
-
-  async getAllUsers() {
-    const [rows] = await pool.query("SELECT id, name, email,gender FROM users");
-    return rows;
-  },
-
-  async deleteUser(id) {
-    await pool.query("DELETE FROM users WHERE id = ?", [id]);
-  },
-
-   async getPendingConnections() {
     const [rows] = await pool.query(
-       `SELECT 
+      "SELECT * FROM forms WHERE status = 'Pending' ORDER BY created_at DESC"
+    );
+    return rows;
+  },
+
+  // ==============================
+  // Update form status
+  // ==============================
+  async updateFormStatus(id, status) {
+    const [result] = await pool.execute(
+      "UPDATE forms SET status = ? WHERE id = ?",
+      [status, id]
+    );
+    return result.affectedRows > 0;
+  },
+
+  // ==============================
+  // Get all users
+  // ==============================
+  async getAllUsers() {
+    const [rows] = await pool.query(
+      "SELECT id, name, email, gender FROM users"
+    );
+    return rows;
+  },
+
+  // ==============================
+  // Delete user
+  // ==============================
+  async deleteUser(id) {
+    const [result] = await pool.query("DELETE FROM users WHERE id = ?", [id]);
+    return result.affectedRows > 0;
+  },
+
+  // ==============================
+  // Pending connections
+  // ==============================
+  async getPendingConnections() {
+    const [rows] = await pool.query(`
+      SELECT 
         c.id, 
         c.status,
         c.receiver_id,
@@ -37,75 +60,118 @@ const AdminService = {
       FROM connections c
       JOIN users u1 ON c.sender_id = u1.id
       JOIN users u2 ON c.receiver_id = u2.id
-      WHERE c.status = 'Pending'`
-    );
+      WHERE c.status = 'Pending'
+    `);
     return rows;
   },
-   async updateConnectionStatus(connectionId, status) {
+
+  async updateConnectionStatus(connectionId, status) {
     const [result] = await pool.query(
       "UPDATE connections SET status = ? WHERE id = ?",
       [status, connectionId]
     );
-    return result;
+    return result.affectedRows > 0;
   },
-   async approveConnection(id) {
+
+  async approveConnection(id) {
     const [result] = await pool.execute(
       "UPDATE connections SET status = 'approved' WHERE id = ?",
       [id]
     );
     return result.affectedRows > 0;
   },
-    async rejectConnection(id) {
+
+  async rejectConnection(id) {
     const [result] = await pool.execute(
       "UPDATE connections SET status = 'rejected' WHERE id = ?",
       [id]
     );
     return result.affectedRows > 0;
   },
-  async getUserById(id){
+
+  async getUserById(id) {
     const [rows] = await pool.query("SELECT * FROM users WHERE id = ?", [id]);
     return rows[0];
   },
 
-  async getNotifications(req, res) {
-  try {
-    // 🔹 Fetch pending connection requests
-    const [pendingConnections] = await pool.query(
-      "SELECT id, user_id, status, created_at FROM notifications WHERE status='pending' ORDER BY created_at DESC LIMIT 5"
+  // ==============================
+  // Get notifications for admin
+  // ==============================
+  async getNotifications(adminId) {
+    try {
+      // 🔹 Fetch recent notifications from `notifications` table
+      const [rows] = await pool.query(
+        "SELECT id, user_id, message, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 10",
+        [adminId]
+      );
+
+      // Optional: you can also fetch pending forms/connections separately
+      // and merge into `rows` array if needed
+
+      return rows;
+    } catch (err) {
+      console.error("❌ Get notifications error:", err);
+      throw new Error("Error fetching notifications");
+    }
+  },
+
+  // ==============================
+  // Add notification
+  // ==============================
+  async addNotification(userId, message) {
+    try {
+      const query =
+        "INSERT INTO notifications (user_id, message, is_read, created_at) VALUES (?, ?, FALSE, NOW())";
+      await pool.query(query, [userId, message]);
+
+      // Optional: Send email to user
+      const [user] = await pool.query(
+        "SELECT email FROM users WHERE id = ?",
+        [userId]
+      );
+      if (user.length > 0 && user[0].email) {
+        await sendEmail({
+          to: user[0].email,
+          subject: "New Notification",
+          text: message,
+        });
+      }
+    } catch (err) {
+      console.error("❌ Error adding notification:", err);
+    }
+  },
+
+  async getRecentUserActivities(){
+    const[rows] = await pool.query(
+      `SELECT 
+      f.id AS form_id,
+      f.full_name_en,
+      f.status,
+      f.created_at,
+      u.email AS user_email
+      FROM forms f
+      JOIN users u ON f.user_id = u.id
+      ORDER BY f.id DESC
+      LIMIT 20`
     );
 
-    // 🔹 Fetch recent form updates (approved or rejected)
-    const [recentForms] = await pool.query(
-      "SELECT id, user_id, status, created_at FROM forms WHERE status IN ('approved', 'rejected') ORDER BY created_at DESC LIMIT 5"
-    );
+     return rows.map((row) => {
+      const dateValue = row.created_at || row.updated_at || new Date();
+      const formattedDate = new Date(dateValue).toLocaleString("en-IN", {
+        dateStyle: "medium",
+        timeStyle: "short",
 
-    const notifications = [];
-
-    // 🔹 Add connection notifications
-    pendingConnections.forEach((conn) => {
-      notifications.push({
-        type: "connection_request",
-        message: `New connection request from User ID ${conn.user_id}`,
-        created_at: conn.created_at,
-      });
     });
-    recentForms.forEach((form) => {
-      notifications.push({
-        type: "form_update",
-        message: `Form ${form.status} for User ID ${form.user_id}`,
-        created_at: form.created_at,
-      });
-    });
-    notifications.sort(
-      (a, b) => new Date(b.created_at) - new Date(a.created_at)
-    );
 
-    res.status(200).json(notifications);
-  } catch (err) {
-    console.error("❌ Get notifications error:", err);
-    res.status(500).json({ message: "Error fetching notifications" });
-  }
-},
+    
+      return {
+        title: `Form submitted by ${row.full_name_en}`,
+        message: `Status: ${row.status}`,
+        email: row.user_email,
+        date: formattedDate,
+  };
+});
+  },
 };
 
 module.exports = AdminService;

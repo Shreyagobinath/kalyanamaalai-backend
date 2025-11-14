@@ -1,5 +1,24 @@
 const UserService = require("./service");
 const pool = require("../../config/db"); // ✅ using connection pool
+const sendEmail = require("../../utils/email");
+const multer = require("multer");
+
+const storage = multer.diskStorage({
+  destination:(req,file,cb)=>
+    cb(null,"uploads/profile_photos"),filename:(req,file,cb)=>{
+      const uniqueName = `${Date.now()}-${file.originalname}`;
+      cb(null,uniqueName);
+    },
+});
+
+const upload = multer({ storage });
+
+
+/**
+ * @desc  Submit new user form with optional profile photo
+ * @route POST /api/v1/user/forms
+ * @access Private
+ */
 
 const UserController = {
   // ==========================
@@ -7,8 +26,15 @@ const UserController = {
   // ==========================
   async submitForm(req, res) {
     try {
-      const userId = req.user.id;
-      const formData = req.body;
+      upload.single("profile_photo")(req, res, async (err) => {
+        if (err) {
+          console.error("File upload error:", err);
+          return res.status(400).json({ message: "Error uploading file" });
+        }
+
+        const userId = req.user.id;
+        const formData = req.body;
+        const profilePhoto = req.file ? req.file.filename : null;
 
       // Mandatory fields validation
       const { full_name_en, gender, dob } = formData;
@@ -18,16 +44,20 @@ const UserController = {
           .json({ message: "Please fill all mandatory fields" });
       }
 
-      // Add status = Pending
-      const result = await UserService.submitForm(userId, {
+      const formToSave = {
         ...formData,
-        status: "Pending",
-      });
+        profile_photo: profilePhoto,
+        status: "Pending"
+      };
+
+      // Add status = Pending
+      const result = await UserService.submitForm(userId, formToSave);
 
       return res.status(201).json({
         message: "Form submitted successfully. Waiting for admin approval.",
         data: result,
       });
+    });
     } catch (err) {
       console.error("Submit form error:", err);
       return res.status(500).json({ message: "Internal server error" });
@@ -88,18 +118,10 @@ const UserController = {
     try {
       const senderId = req.user.id;
       const { receiverId } = req.body;
-
       const result = await UserService.sendConnectionRequest(
         senderId,
         receiverId
       );
-
-      // Add notification for receiver
-      await UserController.addNotification(
-        receiverId,
-        "💌 You have a new connection request!"
-      );
-
       return res.json(result);
     } catch (error) {
       console.error("Error sending connection request:", error);
@@ -126,8 +148,16 @@ const UserController = {
   async addNotification(userId, message) {
     try {
       await UserService.addNotification(userId, message);
+      if(email){
+        await sendEmail({
+          to: email,
+          subject: "New Notification",
+          text: message,
+        });
+      }
     } catch (error) {
       console.error("Error adding notification:", error);
+      res.status(500).json({ message: "Server error" });
     }
   },
   // ==========================
@@ -145,6 +175,40 @@ async markReadNotifications(req, res) {
       res.status(500).json({ message: "Server error" });
     }
   },
+
+  async getAccountDetails(req, res) {
+    try {
+      const userId = req.user.id;
+      const user = await UserService.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      return res.status(200).json({
+        name : user.full_name_en,
+        email: user.email,
+        profile_photo: user.profile_photo,
+      });
+    } catch (err) {
+      console.error("Error fetching account details:", err);
+       res.status(500).json({ message: "Internal server error" });
+    }
+  },
+  async updateAccountDetails(req, res) {
+    try{
+      const userId = req.user.id;
+      const updateData = req.body;
+
+      const updated = await UserService.updateUser(userId,updateData);
+      if(!updated){
+        return res.status(404).json({message:"No changes were made"});
+      }
+
+      res.json({message:"Account details updated successfully"});
+    } catch (err) {
+      console.error("Error updating account details:", err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  }
 };
 
 module.exports = UserController;

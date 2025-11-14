@@ -1,5 +1,8 @@
 const pool = require("../../config/db");
 const { markReadNotifications } = require("./controller");
+const nodemailer = require("nodemailer");
+const sendEmail = require("../../utils/email");
+const { get } = require("mongoose");
 
 const UserService = {
   // Submit a new form
@@ -56,7 +59,22 @@ const UserService = {
         "INSERT INTO connections(sender_id,receiver_id,status) VALUES (?,?,'pending')",
         [senderId,receiverId]
     );
-    return{message:"Request sent to admin for approval"};
+    const [rows] = await pool.query(
+        "SELECT email FROM users WHERE id = ?", [receiverId]
+    );
+    const receiverEmail = rows[0].email;
+    if(receiverEmail){
+      const message = "💌 You have a new connection request!";
+      await this.addNotification(receiverId,message,);
+
+      sendEmail(
+        receiverEmail,
+        "New Connection Request",
+        message
+      );
+
+      return{message:"Request sent to admin for approval"};
+    }
     /*await pool.query(
         "INSERT INTO notifications(user_id,message) VALUES (?,?)",
         [receiverId,"💌 You have a new connection request!"]
@@ -65,10 +83,39 @@ const UserService = {
   },*/
   },
   async addNotification(userId, message) {
+    try {
     const query = "INSERT INTO notifications (user_id, message, is_read) VALUES (?, ?, ?)";
     const [result] = await pool.execute(query, [userId, message, false]);
+
+    const [userRows]= await pool.query(
+      "SELECT email, name FROM users WHERE id = ?", [userId]);
+      if(userRows.length > 0){
+        const user = userRows[0];
+       
+        const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: process.env.SMTP_PORT,
+        secure: process.env.SMTP_SECURE === 'true',
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+        },
+    });
+
+    await transporter.sendMail({
+        from: `"KalyanaMalai" <${process.env.SMTP_USER}>`,
+        to: user.email,
+        subject: "New Notification from KalyanaMalai",
+         text: `Hi ${user.name},\n\n${message}\n\n- My App`,
+          html: `<p>Hi ${user.name},</p><p>${message}</p><p>- My App</p>`,        
+    });
+  }
     return result;
-  },
+  }catch (err) {
+    console.error("Error adding notification:", err);
+    throw new Error("Failed to add notification");
+  }
+},
   async getNotifications(userId) {
     const [rows] = await pool.query(
       "SELECT id, message, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC",
@@ -82,6 +129,18 @@ const UserService = {
       [userId]
     );
     return { message: "All notifications marked as read." };
+  },
+
+  async getUserById(userId) {
+    const [rows] = await pool.query("SELECT id, name, email, gender, city, profile_photo FROM users WHERE id = ?", [userId]);
+    return rows[0];
+  },
+  async updateUser(id, data){
+    const fields = Object.keys(data).map(key => `${key} = ?`).join(", ");
+    const values = Object.values(data);
+    const query = `UPDATE users SET ${fields} WHERE id = ?`;
+    const [result] = await pool.query(query, [...values, id]);
+    return result.affectedRows > 0;
   }
 };
 

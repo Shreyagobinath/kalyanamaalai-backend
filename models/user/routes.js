@@ -10,6 +10,10 @@ router.get("/approved",verifyToken,UserController.getApprovedUsers);
 router.post("/connect",verifyToken,UserController.sendConnectionRequest);
 router.get("/notifications",verifyToken,UserController.getNotifications);
 
+router.get("/notifications",verifyToken,UserController.getNotifications);
 router.put("/notifications/mark-read",verifyToken,UserController.markReadNotifications);
+
+router.get("/account-details", verifyToken, UserController.getAccountDetails);
+router.put("/account", verifyToken, UserController.updateAccountDetails);
 
 module.exports = router;
