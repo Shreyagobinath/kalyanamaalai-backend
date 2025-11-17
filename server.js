@@ -26,6 +26,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/user", userRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/uploads", express.static("uploads"));
+app.use("/test-Emails",userRoutes);
 
 // Test database connection and start server
 const PORT = process.env.PORT || 5000;

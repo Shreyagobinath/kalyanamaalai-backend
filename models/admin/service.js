@@ -73,13 +73,36 @@ const AdminService = {
     return result.affectedRows > 0;
   },
 
-  async approveConnection(id) {
-    const [result] = await pool.execute(
-      "UPDATE connections SET status = 'approved' WHERE id = ?",
-      [id]
+ async approveConnection(connectionId) {
+    // 1️⃣ Get the connection details
+    const [rows] = await pool.query(
+      "SELECT sender_id, receiver_id, status FROM connections WHERE id = ?",
+      [connectionId]
     );
-    return result.affectedRows > 0;
+
+    if (!rows.length) return null; // Connection not found
+
+    const connection = rows[0];
+
+    if (connection.status === "approved") {
+      return connection; // Already approved
+    }
+
+    // 2️⃣ Update the status to 'approved'
+    await pool.query(
+      "UPDATE connections SET status = 'approved', approved_at = NOW() WHERE id = ?",
+      [connectionId]
+    );
+
+    // 3️⃣ Notify both users
+    const message = "💌 Your connection request has been approved by the admin!";
+
+    await AdminService.addNotification(connection.sender_id, message);
+    await AdminService.addNotification(connection.receiver_id, message);
+
+    return connection; // Return connection details for controller
   },
+
 
   async rejectConnection(id) {
     const [result] = await pool.execute(
