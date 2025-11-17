@@ -155,9 +155,10 @@ const UserController = {
           text: message,
         });
       }
+      return true;
     } catch (error) {
       console.error("Error adding notification:", error);
-      res.status(500).json({ message: "Server error" });
+      return false;
     }
   },
   // ==========================
@@ -208,7 +209,43 @@ async markReadNotifications(req, res) {
       console.error("Error updating account details:", err);
       return res.status(500).json({ message: "Internal server error" });
     }
-  }
+  },
+  async getApprovedConnections(req, res){
+    try{
+      const userId = req.user.id;
+      const [rows] = await pool.query(
+          `
+      SELECT 
+        c.id,
+        c.sender_id,
+        c.receiver_id,
+        c.status,
+        c.created_at,
+        u.full_name_en AS connected_user_name,
+        u.email AS connected_user_email,
+        u.profile_photo AS connected_user_photo
+      FROM connections c
+      JOIN users u 
+        ON u.id = (CASE 
+                     WHEN c.sender_id = ? THEN c.receiver_id
+                     ELSE c.sender_id
+                   END)
+      WHERE 
+        (c.sender_id = ? OR c.receiver_id = ?)
+        AND c.status = 'approved'
+      `,
+      [userId, userId, userId]
+      );
+
+       return res.status(200).json(rows);
+    }catch (error){
+      console.error("Error fetching approved connections:",error);
+      return res.status(500).json({message: "Internal server error"});
+    }
+
+  },
+  
+  
 };
 
 module.exports = UserController;

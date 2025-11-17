@@ -33,6 +33,13 @@ const AuthController = {
 
       const user = await AuthService.register({ name, email, password, role });
 
+      await sendEmail({
+        to: email,
+        subject: "Welcome to kalyanamaalai",
+        text:`Hi ${name}, Welcome to kalyanamaalai`,
+         html: `<p>Hi ${name},</p><p>Welcome to <b>Kalyanamaalai</b>! Your account has been created successfully.</p>`,
+      })
+
       res.status(201).json({ message: "Registration successful", user });
     } catch (err) {
       console.error("Register error:", err);

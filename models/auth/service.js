@@ -2,6 +2,23 @@ const pool = require("../../config/db"); // Use pool
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
+const {transporter} = require("../../utils/email"); 
+const nodemailer = require("nodemailer");
+
+const sendEmail = async ({to, subject, text, html})=>{
+  try{
+    const info = await transporter.sendEmail({
+      from: `"Kalyanamaalai" <${process.env.SMTP_USER}>`,
+      to,
+      subject,
+      text,
+      html,
+    });
+    console.log("Email sent:", info.messageId);
+  }catch (err){
+    comsole.error("Failed to send email:",err);
+  }
+}
 
 exports.register = async ({ name, email, password, role }) => {
   const [existing] = await pool.execute("SELECT * FROM users WHERE email=?", [email]);

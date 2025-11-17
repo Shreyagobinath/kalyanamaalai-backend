@@ -1,4 +1,5 @@
 const AdminService = require("./service");
+
 const pool = require("../../config/db");
 const sendEmail = require("../../utils/email"); // Email helper
 
@@ -194,12 +195,16 @@ const AdminController = {
   async approveConnection(req, res) {
     try {
       const connectionId = req.params.id;
-      const approved = await AdminService.approveConnection(connectionId);
-      if (!approved) return res.status(404).json({ message: "Connection not found" });
-      return res.status(200).json({ message: "Connection approved successfully" });
-    } catch (err) {
-      console.error("❌ Approve connection error:", err);
-      return res.status(500).json({ message: "Error approving connection" });
+
+      // ✅ Approve connection & send notifications inside service
+      const success = await AdminService.approveConnection(connectionId);
+
+      if (!success) return res.status(404).json({ message: "Connection not found" });
+
+      return res.json({ message: "Connection approved. Notifications sent." });
+    } catch (error) {
+      console.error("Approve connection error:", error);
+      return res.status(500).json({ message: "Internal server error" });
     }
   },
 
