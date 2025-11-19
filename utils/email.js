@@ -1,22 +1,19 @@
-// utils/email.js
 const nodemailer = require("nodemailer");
 
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST, // e.g., smtp.gmail.com
-  port: process.env.SMTP_PORT, // e.g., 587
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
   secure: false,
   auth: {
-    user: process.env.SMTP_USER, // your email
-    pass: process.env.SMTP_PASS, // your email password / app password
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
   },
-  tls:{
-    rejectUnauthorized: false,
-  }
+  tls: { rejectUnauthorized: false }
 });
 
 const sendEmail = async ({ to, subject, text, html }) => {
   const mailOptions = {
-    from: `"Kalyanamaalai" <${process.env.SMTP_USER}>`, // 👈 this line
+    from: `"Kalyanamaalai" <${process.env.SMTP_USER}>`,
     to,
     subject,
     text,

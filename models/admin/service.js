@@ -73,36 +73,31 @@ const AdminService = {
     return result.affectedRows > 0;
   },
 
- async approveConnection(connectionId) {
-    // 1️⃣ Get the connection details
+  async approveConnection(connectionId) {
     const [rows] = await pool.query(
       "SELECT sender_id, receiver_id, status FROM connections WHERE id = ?",
       [connectionId]
     );
 
-    if (!rows.length) return null; // Connection not found
+    if (!rows.length) return null;
 
     const connection = rows[0];
 
     if (connection.status === "approved") {
-      return connection; // Already approved
+      return connection;
     }
 
-    // 2️⃣ Update the status to 'approved'
     await pool.query(
       "UPDATE connections SET status = 'approved', approved_at = NOW() WHERE id = ?",
       [connectionId]
     );
 
-    // 3️⃣ Notify both users
     const message = "💌 Your connection request has been approved by the admin!";
-
     await AdminService.addNotification(connection.sender_id, message);
     await AdminService.addNotification(connection.receiver_id, message);
 
-    return connection; // Return connection details for controller
+    return connection;
   },
-
 
   async rejectConnection(id) {
     const [result] = await pool.execute(
@@ -118,19 +113,14 @@ const AdminService = {
   },
 
   // ==============================
-  // Get notifications for admin
+  // Get admin notifications
   // ==============================
   async getNotifications(adminId) {
     try {
-      // 🔹 Fetch recent notifications from `notifications` table
       const [rows] = await pool.query(
         "SELECT id, user_id, message, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 10",
         [adminId]
       );
-
-      // Optional: you can also fetch pending forms/connections separately
-      // and merge into `rows` array if needed
-
       return rows;
     } catch (err) {
       console.error("❌ Get notifications error:", err);
@@ -143,20 +133,21 @@ const AdminService = {
   // ==============================
   async addNotification(userId, message) {
     try {
-      const query =
-        "INSERT INTO notifications (user_id, message, is_read, created_at) VALUES (?, ?, FALSE, NOW())";
-      await pool.query(query, [userId, message]);
+      await pool.query(
+        "INSERT INTO notifications (user_id, message, is_read, created_at) VALUES (?, ?, FALSE, NOW())",
+        [userId, message]
+      );
 
-      // Optional: Send email to user
       const [user] = await pool.query(
         "SELECT email FROM users WHERE id = ?",
         [userId]
       );
+
       if (user.length > 0 && user[0].email) {
         await sendEmail({
           to: user[0].email,
           subject: "New Notification",
-          text: message,
+          text: message
         });
       }
     } catch (err) {
@@ -164,37 +155,47 @@ const AdminService = {
     }
   },
 
-  async getRecentUserActivities(){
-    const[rows] = await pool.query(
+  async getRecentUserActivities() {
+    const [rows] = await pool.query(
       `SELECT 
-      f.id AS form_id,
-      f.full_name_en,
-      f.status,
-      f.created_at,
-      u.email AS user_email
+        f.id AS form_id,
+        f.full_name_en,
+        f.status,
+        f.created_at,
+        u.email AS user_email
       FROM forms f
       JOIN users u ON f.user_id = u.id
       ORDER BY f.id DESC
       LIMIT 20`
     );
 
-     return rows.map((row) => {
+    return rows.map((row) => {
       const dateValue = row.created_at || row.updated_at || new Date();
       const formattedDate = new Date(dateValue).toLocaleString("en-IN", {
         dateStyle: "medium",
         timeStyle: "short",
+      });
 
-    });
-
-    
       return {
         title: `Form submitted by ${row.full_name_en}`,
         message: `Status: ${row.status}`,
         email: row.user_email,
-        date: formattedDate,
-  };
-});
+        date: formattedDate
+      };
+    });
   },
+
+  // ==============================
+  // ⭐ NEW FUNCTION ADDED
+  // ==============================
+  async getUserFormById(userId) {
+    const [rows] = await pool.query(
+      "SELECT * FROM user_forms WHERE user_id = ?",
+      [userId]
+    );
+    return rows[0];
+  }
 };
 
 module.exports = AdminService;
+

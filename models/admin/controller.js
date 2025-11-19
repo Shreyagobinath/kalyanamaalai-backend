@@ -1,5 +1,6 @@
-const AdminService = require("./service");
+// backend/models/admin/controller.js
 
+const AdminService = require("./service");
 const pool = require("../../config/db");
 const sendEmail = require("../../utils/email"); // Email helper
 
@@ -24,24 +25,34 @@ const AdminController = {
     try {
       const formId = req.params.id;
       const updated = await AdminService.updateFormStatus(formId, "Approved");
-      if (!updated) {
-        return res.status(404).json({ message: "Form not found" });
-      }
+      if (!updated) return res.status(404).json({ message: "Form not found" });
 
-      // Notify user
-      const [formRows] = await pool.query(
-        "SELECT user_id FROM forms WHERE id = ?",
-        [formId]
-      );
-      if (formRows.length > 0) {
-        const userId = formRows[0].user_id;
-        await AdminController.addNotification(
-          userId,
-          "🎉 Your account has been approved by admin!"
-        );
-      }
+      // Fetch user details
+      const [formRows] = await pool.query("SELECT user_id FROM forms WHERE id = ?", [formId]);
+      if (formRows.length === 0) return res.status(404).json({ message: "User not found for this form" });
 
-      return res.status(200).json({ message: "Form approved successfully" });
+      const userId = formRows[0].user_id;
+      const [userRows] = await pool.query("SELECT name, email FROM users WHERE id = ?", [userId]);
+      if (userRows.length === 0) return res.status(404).json({ message: "User details not found" });
+
+      const user = userRows[0];
+
+      // Send approval email
+      await sendEmail({
+        to: user.email,
+        subject: "Your Profile Has Been Approved",
+        text: `Hi ${user.name}, your profile has been approved by the admin.`,
+        html: `<p>Hi <b>${user.name}</b>,</p>
+               <p>Your profile has been <b style="color:green;">approved</b> by the admin.</p>
+               <p>You can now log in and start using the platform.</p>
+               <br>
+               <p>Regards,<br>Kalyanamaalai Team</p>`
+      });
+
+      // Add notification
+      await AdminController.addNotification(userId, "🎉 Your account has been approved by admin!");
+
+      return res.status(200).json({ message: "Form approved successfully & email sent" });
     } catch (err) {
       console.error("❌ Approve form error:", err);
       return res.status(500).json({ message: "Error approving user" });
@@ -49,30 +60,40 @@ const AdminController = {
   },
 
   // ==============================
-  // Reject a form by ID
+  // Reject form
   // ==============================
   async rejectForm(req, res) {
     try {
       const formId = req.params.id;
       const updated = await AdminService.updateFormStatus(formId, "Rejected");
-      if (!updated) {
-        return res.status(404).json({ message: "Form not found" });
-      }
+      if (!updated) return res.status(404).json({ message: "Form not found" });
 
-      // Notify user
-      const [formRows] = await pool.query(
-        "SELECT user_id FROM forms WHERE id = ?",
-        [formId]
-      );
-      if (formRows.length > 0) {
-        const userId = formRows[0].user_id;
-        await AdminController.addNotification(
-          userId,
-          "❗ Your account has been rejected by admin."
-        );
-      }
+      // Fetch user ID
+      const [formRows] = await pool.query("SELECT user_id FROM forms WHERE id = ?", [formId]);
+      if (formRows.length === 0) return res.status(404).json({ message: "User not found for this form" });
 
-      return res.status(200).json({ message: "Form rejected successfully" });
+      const userId = formRows[0].user_id;
+      const [userRows] = await pool.query("SELECT name, email FROM users WHERE id = ?", [userId]);
+      if (userRows.length === 0) return res.status(404).json({ message: "User details not found" });
+
+      const user = userRows[0];
+
+      // Send rejection email
+      await sendEmail({
+        to: user.email,
+        subject: "Your Profile Has Been Rejected",
+        text: `Hi ${user.name}, your profile has been rejected by the admin.`,
+        html: `<p>Hi <b>${user.name}</b>,</p>
+               <p>Your profile has been <b style="color:red;">rejected</b> by the admin.</p>
+               <p>Please review your information and try again if applicable.</p>
+               <br>
+               <p>Regards,<br>Kalyanamaalai Team</p>`
+      });
+
+      // Add notification
+      await AdminController.addNotification(userId, "❗ Your account has been rejected by admin.");
+
+      return res.status(200).json({ message: "Form rejected successfully & email sent" });
     } catch (err) {
       console.error("❌ Reject form error:", err);
       return res.status(500).json({ message: "Error rejecting user" });
@@ -84,24 +105,18 @@ const AdminController = {
   // ==============================
   async addNotification(userId, message) {
     try {
-      // Insert into DB
       await pool.query(
         "INSERT INTO notifications (user_id, message, created_at) VALUES (?, ?, NOW())",
         [userId, message]
       );
 
-      // Fetch user email
-      const [userRows] = await pool.query(
-        "SELECT email FROM users WHERE id = ?",
-        [userId]
-      );
+      const [userRows] = await pool.query("SELECT email FROM users WHERE id = ?", [userId]);
       if (userRows.length > 0) {
         const email = userRows[0].email;
-        // Send email notification
         await sendEmail({
           to: email,
           subject: "New Notification",
-          text: message,
+          text: message
         });
       }
     } catch (err) {
@@ -110,21 +125,20 @@ const AdminController = {
   },
 
   // ==============================
-  // Get notifications for admin
+  // Get admin notifications
   // ==============================
   async getNotifications(req, res) {
     try {
-      const adminId = req.user.id; // or fetch all if needed
-      const notifications = await AdminService.getNotifications(adminId);
+      const notifications = await AdminService.getRecentUserActivities();
       return res.status(200).json(notifications);
-    } catch (err) {
-      console.error("❌ Get notifications error:", err);
-      return res.status(500).json({ message: "Error fetching notifications" });
+    } catch (error) {
+      console.error("❌ Get notifications error:", error);
+      return res.status(500).json({ message: "Error fetching admin notifications" });
     }
   },
 
   // ==============================
-  // Other existing methods
+  // User Management
   // ==============================
   async getAllUsers(req, res) {
     try {
@@ -136,20 +150,23 @@ const AdminController = {
     }
   },
 
+  // ==============================
+  // Get user full details
+  // ==============================
   async getUserById(req, res) {
     try {
       const { id } = req.params;
-      const [userRows] = await pool.query(
-        "SELECT id, name, email, gender, created_at FROM users WHERE id = ?",
-        [id]
-      );
+
+      const [userRows] = await pool.query("SELECT * FROM users WHERE id = ?", [id]);
       if (!userRows.length) return res.status(404).json({ message: "User not found" });
 
-      const [formRows] = await pool.query(
-        "SELECT * FROM forms WHERE user_id = ?",
-        [id]
-      );
-      const fullDetails = { ...userRows[0], form: formRows[0] || {} };
+      const user = userRows[0];
+
+      const [formRows] = await pool.query("SELECT * FROM forms WHERE user_id = ?", [id]);
+      const form = formRows[0] || {};
+
+      const fullDetails = { ...user, ...form };
+
       return res.status(200).json(fullDetails);
     } catch (err) {
       console.error("❌ Get user by ID error:", err);
@@ -169,6 +186,9 @@ const AdminController = {
     }
   },
 
+  // ==============================
+  // Connection management
+  // ==============================
   async getPendingConnections(req, res) {
     try {
       const connections = await AdminService.getPendingConnections();
@@ -195,15 +215,11 @@ const AdminController = {
   async approveConnection(req, res) {
     try {
       const connectionId = req.params.id;
-
-      // ✅ Approve connection & send notifications inside service
       const success = await AdminService.approveConnection(connectionId);
-
       if (!success) return res.status(404).json({ message: "Connection not found" });
-
-      return res.json({ message: "Connection approved. Notifications sent." });
-    } catch (error) {
-      console.error("Approve connection error:", error);
+      return res.status(200).json({ message: "Connection approved. Notifications sent." });
+    } catch (err) {
+      console.error("❌ Approve connection error:", err);
       return res.status(500).json({ message: "Internal server error" });
     }
   },
@@ -220,14 +236,22 @@ const AdminController = {
     }
   },
 
-  async getNotifications(req, res){
-    try{
-      const notifications = await AdminService.getRecentUserActivities();
-      res.status(200).json(notifications);
-    }catch(error){
-      console.error("Error fetching admin notifications:",error);
-      res.status(500).json({message: "Error fetching admin notifications"});
-      
+  // ==============================
+  // ⭐ NEW FUNCTION ADDED HERE
+  // ==============================
+  async getUserFormDetails(req, res) {
+    try {
+      const { userId } = req.params;
+      const userForm = await AdminService.getUserFormById(userId);
+
+      if (!userForm) {
+        return res.status(404).json({ message: "User form not found" });
+      }
+
+      return res.status(200).json(userForm);
+    } catch (err) {
+      console.error("❌ Get user form details error:", err);
+      return res.status(500).json({ message: "Failed to fetch user form" });
     }
   }
 };

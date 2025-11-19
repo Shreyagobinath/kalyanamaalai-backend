@@ -7,6 +7,8 @@ const userRoutes = require("./models/user/routes");
 const adminRoutes = require("./models/admin/routes");
 const cors = require("cors");
 
+
+
 dotenv.config();
 
 const app = express();
@@ -26,7 +28,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/user", userRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/uploads", express.static("uploads"));
-app.use("/test-Emails",userRoutes);
+
 
 // Test database connection and start server
 const PORT = process.env.PORT || 5000;
@@ -39,7 +41,7 @@ const startServer = async () => {
     console.log("✅ Backend connected successfully to MySQL");
 
     app.listen(PORT, () => {
-      console.log(`🚀 Server running on http://localhost:${PORT}`);
+      console.log("🚀 Server running on http://localhost:${PORT}");
     });
   } catch (error) {
     console.error("❌ Database connection failed:", error);
