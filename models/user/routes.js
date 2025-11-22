@@ -1,35 +1,77 @@
+// models/user/routes.js
 const express = require("express");
 const router = express.Router();
 const UserController = require("./controller");
-const { verifyToken } = require("../../middleware/authmiddle");
-const sendEmail = require("../../utils/email");
+const { verifyToken, authorizeRoles } = require("../../middleware/authmiddle");
+const sendEmail = require("../../utils/email"); // make sure this import exists
 
-router.post("/forms", verifyToken, UserController.submitForm);
-router.get("/forms", verifyToken, UserController.getForms);
+// ==============================
+// USER FORM ROUTES
+// ==============================
 
-router.get("/approved",verifyToken,UserController.getApprovedUsers);
-router.post("/connect",verifyToken,UserController.sendConnectionRequest);
-router.get("/connections/approved",verifyToken,UserController.getApprovedConnections);
+// Submit user form (with profile photo)
+router.post("/forms", verifyToken, authorizeRoles("user"), async (req, res) => {
+  try {
+    const { name, dob, gender, city, email } = req.body;
 
-router.get("/notifications",verifyToken,UserController.getNotifications);
-router.put("/notifications/mark-read",verifyToken,UserController.markReadNotifications);
+    // Insert into DB
+    await UserController.submitForm(req, res);
 
-router.get("/account-details", verifyToken, UserController.getAccountDetails);
-router.put("/account", verifyToken, UserController.updateAccountDetails);
+    // Send JSON response
+    return res.status(200).json({ message: "Form submitted successfully" });
+  } catch (err) {
+    console.error("Form submission error:", err);
+    return res.status(500).json({ message: "Error submitting form" });
+  }
+});
 
-router.get("/test-email", async (req, res)=>{
-    try{
-        await sendEmail({
-            to: "shreyagobinath29@gmail.com",
-            subject: "Test Email from API",
-            text:"your email setup works!!!!!🎉"
-        });
+// Get all forms of current user
+router.get("/forms", verifyToken, authorizeRoles("user"), UserController.getForms);
 
-        res.json({messager:"Email sent successfully!"});   
-    }catch (err){
-        console.error("Email error:",err);
-        res.status(500).json({message:"Failed to send email",error:err});
-    }
+// Check current user's form & approval status
+router.get("/forms/status", verifyToken, authorizeRoles("user"), UserController.checkFormStatus);
+
+// Get specific form by ID
+router.get("/forms/:id", verifyToken, authorizeRoles("user"), UserController.getFormById);
+
+// ==============================
+// APPROVED USERS
+// ==============================
+router.get("/approved", verifyToken, authorizeRoles("user"), UserController.getApprovedUsers);
+
+// ==============================
+// CONNECTION REQUESTS
+// ==============================
+router.post("/connect", verifyToken, authorizeRoles("user"), UserController.sendConnectionRequest);
+
+// ==============================
+// NOTIFICATIONS
+// ==============================
+router.get("/notifications", verifyToken, authorizeRoles("user"), UserController.getNotifications);
+router.put("/notifications/mark-read", verifyToken, authorizeRoles("user"), UserController.markReadNotifications);
+
+// ==============================
+// ACCOUNT
+// ==============================
+router.get("/account-details", verifyToken, authorizeRoles("user"), UserController.getAccountDetails);
+router.put("/account", verifyToken, authorizeRoles("user"), UserController.updateAccountDetails);
+
+// ==============================
+// TEST EMAIL ROUTE
+// ==============================
+router.get("/test-email", async (req, res) => {
+  try {
+    await sendEmail({
+      to: "priyankaangkuraj@gmail.com",
+      subject: "Test Email from API",
+      text: "your email setup works!!!!!🎉",
+    });
+
+    res.json({ message: "Email sent successfully!" });
+  } catch (err) {
+    console.error("Email error:", err);
+    res.status(500).json({ message: "Failed to send email", error: err });
+  }
 });
 
 module.exports = router;

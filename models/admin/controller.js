@@ -1,175 +1,241 @@
 // backend/models/admin/controller.js
 
-const AdminService = require("./service");
 const pool = require("../../config/db");
-const sendEmail = require("../../utils/email"); // Email helper
+const sendEmail = require("../../utils/email");
 
 const AdminController = {
+
   // ==============================
-  // Get all pending forms
+  // GET ALL PENDING FORMS
   // ==============================
   async getPendingForms(req, res) {
     try {
-      const forms = await AdminService.getPendingForms();
+      const [forms] = await pool.query(`
+        SELECT 
+          uf.id AS form_id,
+          uf.user_id,
+          uf.full_name_en,
+          uf.gender,
+          uf.dob,
+          uf.email,
+          uf.phone,
+          uf.address_en,
+          uf.profile_photo,
+          uf.status AS form_status,
+          uf.created_at,
+          u.isApproved
+        FROM user_forms uf
+        JOIN users u ON uf.user_id = u.id
+        WHERE uf.status = 'Pending'
+        ORDER BY uf.created_at DESC
+      `);
+
       return res.status(200).json(forms);
     } catch (err) {
-      console.error("❌ Get pending forms error:", err);
-      return res.status(500).json({ message: "Error fetching pending users" });
+      console.error("Get pending forms error:", err);
+      return res.status(500).json({ message: "Error fetching pending forms" });
     }
   },
 
   // ==============================
-  // Approve a form by ID
+  // GET SINGLE FORM BY ID
+  // ==============================
+  async getFormById(req, res) {
+    try {
+      const { id } = req.params;
+
+      const [rows] = await pool.query(`
+        SELECT 
+          uf.*,
+          u.full_name_en AS user_name,
+          u.email AS user_email,
+          u.gender AS user_gender
+        FROM user_forms uf
+        JOIN users u ON uf.user_id = u.id
+        WHERE uf.id = ?
+      `, [id]);
+
+      if (!rows.length)
+        return res.status(404).json({ message: "Form not found" });
+
+      return res.status(200).json(rows[0]);
+    } catch (err) {
+      console.error("Get form by ID error:", err);
+      return res.status(500).json({ message: "Error fetching form details" });
+    }
+  },
+
+  // ==============================
+  // APPROVE FORM
   // ==============================
   async approveForm(req, res) {
+    const conn = await pool.getConnection();
     try {
+      await conn.beginTransaction();
+
       const formId = req.params.id;
-      const updated = await AdminService.updateFormStatus(formId, "Approved");
-      if (!updated) return res.status(404).json({ message: "Form not found" });
 
-      // Fetch user details
-      const [formRows] = await pool.query("SELECT user_id FROM forms WHERE id = ?", [formId]);
-      if (formRows.length === 0) return res.status(404).json({ message: "User not found for this form" });
+      // Get user ID from form
+      const [[form]] = await conn.query(
+        "SELECT user_id FROM user_forms WHERE id=? LIMIT 1",
+        [formId]
+      );
 
-      const userId = formRows[0].user_id;
-      const [userRows] = await pool.query("SELECT name, email FROM users WHERE id = ?", [userId]);
-      if (userRows.length === 0) return res.status(404).json({ message: "User details not found" });
+      if (!form) {
+        await conn.rollback();
+        return res.status(404).json({ message: "Form not found" });
+      }
 
-      const user = userRows[0];
+      const userId = form.user_id;
 
-      // Send approval email
-      await sendEmail({
-        to: user.email,
-        subject: "Your Profile Has Been Approved",
-        text: `Hi ${user.name}, your profile has been approved by the admin.`,
-        html: `<p>Hi <b>${user.name}</b>,</p>
-               <p>Your profile has been <b style="color:green;">approved</b> by the admin.</p>
-               <p>You can now log in and start using the platform.</p>
-               <br>
-               <p>Regards,<br>Kalyanamaalai Team</p>`
-      });
+      // Approve the form
+      await conn.query(
+        "UPDATE user_forms SET status='Approved' WHERE id=?",
+        [formId]
+      );
 
-      // Add notification
-      await AdminController.addNotification(userId, "🎉 Your account has been approved by admin!");
+      // Update user table also
+      await conn.query(
+        "UPDATE users SET isApproved=1 WHERE id=?",
+        [userId]
+      );
 
-      return res.status(200).json({ message: "Form approved successfully & email sent" });
+      await conn.commit();
+      return res.status(200).json({ message: "Form approved successfully" });
+
     } catch (err) {
-      console.error("❌ Approve form error:", err);
-      return res.status(500).json({ message: "Error approving user" });
+      await conn.rollback();
+      console.error("approveForm error:", err);
+      return res.status(500).json({ message: "Server error approving form" });
+    } finally {
+      conn.release();
     }
   },
 
   // ==============================
-  // Reject form
+  // REJECT FORM
   // ==============================
   async rejectForm(req, res) {
     try {
       const formId = req.params.id;
-      const updated = await AdminService.updateFormStatus(formId, "Rejected");
-      if (!updated) return res.status(404).json({ message: "Form not found" });
 
-      // Fetch user ID
-      const [formRows] = await pool.query("SELECT user_id FROM forms WHERE id = ?", [formId]);
-      if (formRows.length === 0) return res.status(404).json({ message: "User not found for this form" });
-
-      const userId = formRows[0].user_id;
-      const [userRows] = await pool.query("SELECT name, email FROM users WHERE id = ?", [userId]);
-      if (userRows.length === 0) return res.status(404).json({ message: "User details not found" });
-
-      const user = userRows[0];
-
-      // Send rejection email
-      await sendEmail({
-        to: user.email,
-        subject: "Your Profile Has Been Rejected",
-        text: `Hi ${user.name}, your profile has been rejected by the admin.`,
-        html: `<p>Hi <b>${user.name}</b>,</p>
-               <p>Your profile has been <b style="color:red;">rejected</b> by the admin.</p>
-               <p>Please review your information and try again if applicable.</p>
-               <br>
-               <p>Regards,<br>Kalyanamaalai Team</p>`
-      });
-
-      // Add notification
-      await AdminController.addNotification(userId, "❗ Your account has been rejected by admin.");
-
-      return res.status(200).json({ message: "Form rejected successfully & email sent" });
-    } catch (err) {
-      console.error("❌ Reject form error:", err);
-      return res.status(500).json({ message: "Error rejecting user" });
-    }
-  },
-
-  // ==============================
-  // Add notification helper
-  // ==============================
-  async addNotification(userId, message) {
-    try {
-      await pool.query(
-        "INSERT INTO notifications (user_id, message, created_at) VALUES (?, ?, NOW())",
-        [userId, message]
+      const [[form]] = await pool.query(
+        "SELECT user_id FROM user_forms WHERE id=?",
+        [formId]
       );
 
-      const [userRows] = await pool.query("SELECT email FROM users WHERE id = ?", [userId]);
-      if (userRows.length > 0) {
-        const email = userRows[0].email;
-        await sendEmail({
-          to: email,
-          subject: "New Notification",
-          text: message
-        });
-      }
+      if (!form)
+        return res.status(404).json({ message: "Form not found" });
+
+      const userId = form.user_id;
+
+      await pool.query(
+        "UPDATE user_forms SET status='Rejected' WHERE id=?",
+        [formId]
+      );
+
+      const [[user]] = await pool.query(
+        "SELECT full_name_en AS name, email FROM users WHERE id=?",
+        [userId]
+      );
+
+      await sendEmail({
+        to: user.email,
+        subject: "Your Form Has Been Rejected",
+        text: `Hi ${user.name}, your form has been rejected.`,
+        html: `<p>Hi <b>${user.name}</b>, your form has been <span style="color:red">Rejected</span>.</p>`
+      });
+
+      await AdminController.addNotification(userId, "Rejected");
+
+      return res.status(200).json({ message: "Form rejected & notification sent" });
+
     } catch (err) {
-      console.error("❌ Add notification error:", err);
+      console.error("Reject form error:", err);
+      return res.status(500).json({ message: "Error rejecting form" });
     }
   },
 
   // ==============================
-  // Get admin notifications
+  // NOTIFICATIONS
   // ==============================
+  async addNotification(userId, status) {
+    try {
+      await pool.query(
+        "INSERT INTO notifications (user_id, status, created_at) VALUES (?, ?, NOW())",
+        [userId, status]
+      );
+    } catch (err) {
+      console.error("Add notification error:", err);
+    }
+  },
+
   async getNotifications(req, res) {
     try {
-      const notifications = await AdminService.getRecentUserActivities();
-      return res.status(200).json(notifications);
-    } catch (error) {
-      console.error("❌ Get notifications error:", error);
-      return res.status(500).json({ message: "Error fetching admin notifications" });
+      const [notes] = await pool.query(`
+        SELECT 
+          u.full_name_en AS user_name,
+          u.email AS user_email,
+          f.created_at AS form_submitted_at,
+          f.status AS form_status
+        FROM user_forms f
+        JOIN users u ON f.user_id = u.id
+        ORDER BY f.created_at DESC
+      `);
+
+      return res.status(200).json(notes);
+    } catch (err) {
+      console.error("Get notifications error:", err);
+      return res.status(500).json({ message: "Error fetching notifications" });
     }
   },
 
   // ==============================
-  // User Management
+  // USERS
   // ==============================
   async getAllUsers(req, res) {
     try {
-      const users = await AdminService.getAllUsers();
-      return res.status(200).json(users);
+      const [rows] = await pool.query(`SELECT * FROM users`);
+      return res.status(200).json(rows);
     } catch (err) {
-      console.error("❌ Get all users error:", err);
-      return res.status(500).json({ message: "Internal server error" });
+      console.error("Get all users error:", err);
+      return res.status(500).json({ message: "Error fetching users" });
     }
   },
 
   // ==============================
-  // Get user full details
+  // FIXED: GET USER BY ID WITH FULL FORM DETAILS
   // ==============================
   async getUserById(req, res) {
     try {
       const { id } = req.params;
 
-      const [userRows] = await pool.query("SELECT * FROM users WHERE id = ?", [id]);
-      if (!userRows.length) return res.status(404).json({ message: "User not found" });
+      const connection = await pool.getConnection();
 
-      const user = userRows[0];
+    const query = `
+  SELECT 
+    u.id, u.name, u.email, u.gender, u.phone, u.address_en, u.dob,
+    u.father_name_en, u.mother_name_en, u.siblings, u.location, u.marital_status,
+    f.full_name_en, f.religion_en, f.caste_en, f.gothram_en,
+    f.star_en, f.raasi_en, f.height, f.weight, f.complexion_en,
+    f.education_en, f.occupation_en, f.income_en,
+    f.preferred_age_range, f.preferred_religion, f.preferred_occupation, f.preferred_location
+  FROM users u
+  LEFT JOIN user_forms f ON u.id = f.user_id
+  WHERE u.id = ?
+  LIMIT 1`;
 
-      const [formRows] = await pool.query("SELECT * FROM forms WHERE user_id = ?", [id]);
-      const form = formRows[0] || {};
+const [rows] = await connection.query(query, [id]);
+connection.release();
 
-      const fullDetails = { ...user, ...form };
 
-      return res.status(200).json(fullDetails);
+
+      if (rows.length === 0) return res.status(404).json({ message: "User not found" });
+
+      res.status(200).json(rows[0]);
+
     } catch (err) {
-      console.error("❌ Get user by ID error:", err);
+      console.error("Get user details error:", err);
       return res.status(500).json({ message: "Error fetching user details" });
     }
   },
@@ -177,83 +243,80 @@ const AdminController = {
   async deleteUser(req, res) {
     try {
       const userId = req.params.id;
-      const deleted = await AdminService.deleteUser(userId);
-      if (!deleted) return res.status(404).json({ message: "User not found" });
+
+      await pool.query("DELETE FROM users WHERE id=?", [userId]);
+      await pool.query("DELETE FROM user_forms WHERE user_id=?", [userId]);
+
       return res.status(200).json({ message: "User deleted successfully" });
     } catch (err) {
-      console.error("❌ Delete user error:", err);
-      return res.status(500).json({ message: "Internal server error" });
+      console.error("Delete user error:", err);
+      return res.status(500).json({ message: "Error deleting user" });
     }
   },
 
   // ==============================
-  // Connection management
+  // CONNECTION REQUESTS
   // ==============================
   async getPendingConnections(req, res) {
     try {
-      const connections = await AdminService.getPendingConnections();
-      return res.status(200).json(connections);
-    } catch (err) {
-      console.error("❌ Get pending connections error:", err);
-      return res.status(500).json({ message: "Error fetching pending connections" });
-    }
-  },
+      const [rows] = await pool.query(`
+        SELECT 
+          c.id,
+          c.status,
+          c.sender_id,
+          c.receiver_id,
+          s.name AS sender_name,
+          s.email AS sender_email,
+          r.name AS receiver_name,
+          r.email AS receiver_email,
+          c.created_at
+        FROM connections c
+        JOIN users s ON c.sender_id = s.id
+        JOIN users r ON c.receiver_id = r.id
+        WHERE c.status = 'Pending'
+      `);
 
-  async updateConnectionStatus(req, res) {
-    try {
-      const connectionId = req.params.id;
-      const { status } = req.body;
-      const updated = await AdminService.updateConnectionStatus(connectionId, status);
-      if (!updated) return res.status(404).json({ message: "Connection not found" });
-      return res.status(200).json({ message: "Connection status updated successfully" });
+      return res.status(200).json(rows);
+
     } catch (err) {
-      console.error("❌ Update connection status error:", err);
-      return res.status(500).json({ message: "Error updating connection status" });
+      console.error("Get pending connections error:", err);
+      return res.status(500).json({ message: "Error fetching pending connections" });
     }
   },
 
   async approveConnection(req, res) {
     try {
-      const connectionId = req.params.id;
-      const success = await AdminService.approveConnection(connectionId);
-      if (!success) return res.status(404).json({ message: "Connection not found" });
-      return res.status(200).json({ message: "Connection approved. Notifications sent." });
+      const connId = req.params.id;
+
+      await pool.query(
+        "UPDATE connections SET status='approved' WHERE id=?",
+        [connId]
+      );
+
+      return res.status(200).json({ message: "Connection approved" });
+
     } catch (err) {
-      console.error("❌ Approve connection error:", err);
-      return res.status(500).json({ message: "Internal server error" });
+      console.error("Approve connection error:", err);
+      return res.status(500).json({ message: "Error approving connection" });
     }
   },
 
   async rejectConnection(req, res) {
     try {
-      const connectionId = req.params.id;
-      const rejected = await AdminService.rejectConnection(connectionId);
-      if (!rejected) return res.status(404).json({ message: "Connection not found" });
-      return res.status(200).json({ message: "Connection rejected successfully" });
+      const connId = req.params.id;
+
+      await pool.query(
+        "UPDATE connections SET status='rejected' WHERE id=?",
+        [connId]
+      );
+
+      return res.status(200).json({ message: "Connection rejected" });
     } catch (err) {
-      console.error("❌ Reject connection error:", err);
+      console.error("Reject connection error:", err);
       return res.status(500).json({ message: "Error rejecting connection" });
     }
-  },
-
-  // ==============================
-  // ⭐ NEW FUNCTION ADDED HERE
-  // ==============================
-  async getUserFormDetails(req, res) {
-    try {
-      const { userId } = req.params;
-      const userForm = await AdminService.getUserFormById(userId);
-
-      if (!userForm) {
-        return res.status(404).json({ message: "User form not found" });
-      }
-
-      return res.status(200).json(userForm);
-    } catch (err) {
-      console.error("❌ Get user form details error:", err);
-      return res.status(500).json({ message: "Failed to fetch user form" });
-    }
   }
+
 };
 
 module.exports = AdminController;
